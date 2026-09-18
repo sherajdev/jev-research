@@ -1,7 +1,7 @@
-# Jev research for this server
+# Jev + Herdr: Practical AI Agent Orchestration
 
-This directory captures how to use TypeSafe's Jev model alongside Herdr and the
-coding agents installed on this server.
+A practical guide to using TypeSafe Jev with Herdr and coding agents such as
+Claude, Codex, and Hermes.
 
 ## Who this is for
 
