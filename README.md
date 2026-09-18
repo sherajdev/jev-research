@@ -72,6 +72,52 @@ The main question types are:
 
 Choice and Score answers include probabilities and confidence. Use those signals with thresholds owned by your application. Typed output provides a stable interface; it does not guarantee that a judgment is correct.
 
+## The TypeSafe skill
+
+The TypeSafe skill is an integration guide for building with TypeSafe and Jev. It is not a separate daemon or agent; it gives an AI coding assistant a disciplined way to design and implement TypeSafe workflows.
+
+When the skill is used, the assistant should:
+
+- Read the current TypeSafe documentation before writing integration code.
+- Treat Jev as a typed decision component rather than a chat agent.
+- Keep workflow logic, permissions, and execution in ordinary code.
+- Ask narrow questions over explicit application state.
+- Use probabilities and confidence to decide when to act, clarify, or request human review.
+- Test representative cases instead of assuming every judgment is correct.
+
+The skill covers the three main question types:
+
+- **Choice** selects one option, such as Claude, Codex, Hermes, human review, or a deterministic tool.
+- **Score** rates a dimension along ordered levels, such as low, medium, high, or destructive risk.
+- **Noul** estimates whether a yes/no condition holds, such as whether approval is required.
+
+For a Herdr-based system, the skill recommends this workflow:
+
+~~~text
+task + repository state + available agents
+                 |
+                 v
+      Jev chooses route and risk
+                 |
+                 v
+       coordinator applies policy
+                 |
+                 v
+     Herdr prompts Claude/Codex/Hermes
+                 |
+                 v
+       tests, diff, and agent output
+                 |
+                 v
+      Jev helps decide what happens next
+~~~
+
+The important boundary is that Jev chooses from bounded, known options. Its answer must not become arbitrary shell input, a deployment command, a browser selector, or automatic permission to perform a destructive action.
+
+Confidence is a signal, not proof. High confidence may support low-risk automation; medium confidence may require confirmation; low confidence should usually lead to clarification or human review. Thresholds belong to the application and should be tested against real outcomes.
+
+The skill also emphasizes keeping the TypeSafe API key server-side, separating observed facts from model judgments, asking independent questions together when possible, and recording raw answers and decisions for later review.
+
 ## What Herdr contributes
 
 Herdr provides the process and terminal control plane. A coordinator can discover live workers, prompt a named agent, wait for a lifecycle state, and read the result:
