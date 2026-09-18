@@ -1,135 +1,139 @@
 # Jev + Herdr: Practical AI Agent Orchestration
 
-A practical guide to using TypeSafe Jev with Herdr and coding agents such as
-Claude, Codex, and Hermes.
+A public guide to using [TypeSafe Jev](https://typesafe.ai/) with [Herdr](https://herdr.dev/) and coding agents such as Claude, Codex, and Hermes.
 
-## Who this is for
+This repository explains a reusable architecture, provides a small Jev routing prototype, and reviews a browser worker built with Jev. The server that inspired this research is one example implementation; the patterns apply to local workstations, shared development servers, CI systems, and agent platforms.
 
-This guide is for founders, operators, developers, and AI platform builders who
-want several AI workers to move a project forward without giving one model
-unlimited control.
+## The idea
 
-The central idea is simple: let Jev make small, typed judgments; let Herdr manage
-where work runs; let coding agents do the work; and keep policy and irreversible
-actions in ordinary code or with a human.
+Use each component for the job it is good at:
 
-## The plain-language version
+- **Jev** makes small, typed judgments about text and application state: route a task, score risk, select evidence, or decide whether more context is needed.
+- **Herdr** manages workspaces, tabs, panes, processes, and recognized coding agents.
+- **Claude, Codex, Hermes, and other agents** inspect repositories, edit files, run tests, and explain results.
+- **Coordinator code** owns policy, thresholds, audit records, retries, and irreversible actions.
+- **People** approve high-impact or ambiguous work.
+
+Jev recommends. Code decides. Herdr runs the work. Agents execute bounded tasks.
+
+## A plain-language mental model
 
 Imagine a small operations team:
 
-1. **Jev is the triage desk.** It reads the task and recommends which kind of worker
-   should handle it, how risky the next step looks, and whether the situation is clear.
-2. **Herdr is the office manager.** It keeps Claude, Codex, Hermes, shells, tests,
-   and browser workers in separate terminal spaces and reports their state.
-3. **Coding agents are specialists.** They inspect files, write code, run tests, and
-   explain results.
-4. **The coordinator is the manager.** It applies rules, records decisions, and
-   asks a person when confidence or risk is not acceptable.
+1. Jev is the triage desk. It recommends which worker should handle a request and how uncertain or risky the next step appears.
+2. Herdr is the office manager. It keeps each worker in a separate terminal space and reports whether it is idle, working, blocked, or done.
+3. Coding agents are specialists. They investigate, implement, test, and review.
+4. The coordinator is the manager. It applies rules and asks a person when the system should not proceed automatically.
 
-A model can recommend an action without being allowed to execute arbitrary commands.
-The coordinator dispatches only known operations to known workers.
+This gives a system multiple specialized workers without giving a model unrestricted shell access.
 
-## Findings
+## Recommended architecture
 
-Jev is a typed decision service, not a chat agent. The current API is:
+~~~text
+request / webhook / operator
+          |
+          v
+state snapshot (task, repository, policy, available workers)
+          |
+          v
+Jev: route + risk + readiness + human-approval judgment
+          |
+          +--> uncertain or high impact --> human review
+          |
+          v
+coordinator policy checks
+          |
+          v
+Herdr prompt to Claude, Codex, or Hermes
+          |
+          v
+agent output, diff, tests, and lifecycle state
+          |
+          v
+Jev review judgment and next route
+~~~
 
-```text
+Keep the model's answer constrained to an allowlist. A Jev answer may select a worker name or operation, but it must never become arbitrary shell text, a selector, a deployment command, or authorization to merge.
+
+## What Jev contributes
+
+Jev is a typed decision service rather than a chat agent. A request sends one state value and one or more questions to the System One API:
+
+~~~text
 POST https://api.typesafe.ai/v1/systemone
 Authorization: Bearer $TYPESAFE_API_KEY
-```
+~~~
 
-Requests contain one `state` value and one or more typed questions. Jev returns
-`Choice`, `Score`, and `Noul` answers with probabilities; `Choice` and `Score`
-also include confidence. Jev currently accepts text, JSON objects, and arrays of
-text. It does not generate code or explanations, so application code must own
-the workflow and the final action.
+The main question types are:
 
-The best fit for this server is a small coordinator service:
+- **Choice**: select one option, such as 'claude', 'codex', 'hermes', 'deterministic', or 'human'.
+- **Score**: rate a dimension using ordered descriptions, such as read-only, reversible, risky, or destructive.
+- **Noul**: estimate whether a condition holds, such as 'does this require human approval?'
 
-1. Collect a task, repository snapshot, policy, and the current agent/pane state.
-2. Ask Jev independent questions in one request: which agent should handle the
-   task, how risky it is, whether a human review is required, and whether the
-   task is ready to dispatch.
-3. Keep deterministic rules in code. For example, never auto-merge, never expose
-   credentials, and require human approval for destructive operations.
-4. Use Herdr to prompt the selected agent and observe its lifecycle.
-5. Re-evaluate the resulting diff or report with Jev, then route for review,
-   another agent, or completion.
+Choice and Score answers include probabilities and confidence. Use those signals with thresholds owned by your application. Typed output provides a stable interface; it does not guarantee that a judgment is correct.
 
-This separates responsibilities cleanly:
+## What Herdr contributes
 
-| Layer | Responsibility |
-| --- | --- |
-| Jev | Semantic judgments and calibrated probabilities |
-| Coordinator | Policy, thresholds, state snapshots, retries, audit records |
-| Herdr | Workspaces, tabs, panes, agent start/prompt/read/wait |
-| Claude/Codex/Hermes | Code changes, investigation, tests, and explanations |
+Herdr provides the process and terminal control plane. A coordinator can discover live workers, prompt a named agent, wait for a lifecycle state, and read the result:
 
-## Reference environment
-
-The research was developed on a server with Herdr, Claude Code, Codex CLI, Hermes
-Agent, Node.js, and Python available. Versions and pane IDs change over time; use
-the installed CLI as the authority and discover live Herdr IDs with
-herdr agent list.
-
-## Recommended first use cases
-
-- **Intent routing:** choose Claude, Codex, Hermes, deterministic tooling, or a
-  human based on task shape and repository context.
-- **Risk gating:** score a proposed change and use a Noul question for “does this
-  require human approval?” before sending a prompt or applying an operation.
-- **Review routing:** choose whether a result needs another coding agent, a human,
-  or a test-only follow-up based on the diff and test output.
-- **Evidence selection:** select the most relevant files, logs, or prior reports
-  from a candidate list before passing context to an agent.
-
-Start with routing and review gating. They add useful control without asking Jev
-to write code or replace the agents.
-
-## Files
-
-- [architecture.md](architecture.md): proposed event flow, state shape, thresholds,
-  and Herdr command mapping.
-- [jev-router.ts](jev-router.ts): a minimal TypeScript entry point using the
-  official TypeSafe JavaScript SDK. It only asks Jev for judgments and prints a
-  dispatch decision; Herdr actions remain explicit coordinator code.
-- [jev-ultrafast.md](jev-ultrafast.md): review of Browser Use's Jev browser worker,
-  its guardrails, and how it fits beside coding agents.
-- [sources.md](sources.md): live documentation and local CLI sources used for this
-  research.
-
-## First setup
-
-```bash
-cd /home/openclaw/jev-research
-npm install @typesafe-ai/sdk
-# Load TYPESAFE_API_KEY from your secret store or a mode-600 .env file
-npx tsx jev-router.ts
-```
-
-The prototype is intentionally dry-run. After validating thresholds against real
-tasks, connect its `dispatch` branch to a separately reviewed Herdr adapter using
-commands such as:
-
-```bash
+~~~bash
 herdr agent list
 herdr agent prompt <unique-agent-name> "<bounded task>" --wait --timeout 120000
 herdr agent get <unique-agent-name>
 herdr agent read <unique-agent-name> --source recent-unwrapped --lines 120
-```
+~~~
 
-Only use Herdr control commands from a Herdr-managed pane. Prefer unique agent
-names or IDs returned by Herdr, and keep `--no-focus` for background layout work.
+The exact agent names and pane IDs are runtime data. Discover them from Herdr rather than hard-coding them. Use Herdr control commands from a Herdr-managed pane and keep background work unfocused when appropriate.
 
+## Minimal prototype
 
-## Safety rules
+[jev-router.ts](jev-router.ts) asks Jev to route a task, score risk, and decide whether the state is ready for dispatch. It prints a dry-run decision; a reviewed Herdr adapter can consume that decision afterward.
 
-- Keep API keys in a local secret store or a mode-600 environment file. Never commit
-  .env, place keys in prompts, or include them in Jev state.
-- Treat Jev output as input to policy code, never as authorization by itself.
-- Allowlist agent names, commands, and destinations. Do not turn a model answer into
-  arbitrary shell text.
-- Require human approval for merging, deployment, production changes, secret access,
-  purchases, deletion, and other irreversible operations.
-- Record question definitions, raw typed answers, thresholds, selected worker, and
-  outcome so decisions can be reviewed later.
+~~~bash
+npm install @typesafe-ai/sdk
+# Load TYPESAFE_API_KEY from a secret manager or a mode-600 environment file
+npx tsx jev-router.ts
+~~~
+
+Keep the API key server-side. Do not put it in source, prompts, logs, or Jev state.
+
+## Browser tasks
+
+[jev-ultrafast.md](jev-ultrafast.md) reviews [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast), which applies the same design to browser control:
+
+1. Observe visible DOM controls and assign stable indexes.
+2. Ask Jev to choose an allowlisted operation and compatible target.
+3. Resolve the index to the observed DOM node in code.
+4. Re-check freshness, visibility, geometry, and hit-testing before execution.
+5. Independently verify the requested outcome after DONE.
+
+This makes Jev UltraFast a useful browser worker beside coding agents. A coding agent can request browser evidence, and the coordinator can return the structured trace for review.
+
+## Who this is for
+
+- **Founders and operators** designing reliable AI-assisted workflows.
+- **Developers** orchestrating Claude, Codex, Hermes, browser workers, and deterministic tools.
+- **Platform builders** adding routing, review gates, and auditability to agent systems.
+- **Researchers** exploring calibrated, structured decisions instead of free-form generation.
+
+## Safety checklist
+
+- Keep API keys in a secret manager or a mode-600 environment file; never commit .env.
+- Treat page content, repository text, and agent output as untrusted input.
+- Allowlist workers, commands, destinations, and external side effects.
+- Require human approval for merging, deployment, production changes, secret access, purchases, deletion, and other irreversible operations.
+- Re-snapshot state before acting on delayed judgments.
+- Log the question definitions, raw answers, thresholds, selected worker, and outcome.
+- Test thresholds on representative tasks before enabling automatic dispatch.
+
+## Repository contents
+
+- [architecture.md](architecture.md) — state shape, event flow, thresholds, and Herdr adapter design.
+- [jev-router.ts](jev-router.ts) — minimal TypeScript routing prototype using the official SDK.
+- [jev-ultrafast.md](jev-ultrafast.md) — review of Jev UltraFast, its guardrails, evidence, and limits.
+- [sources.md](sources.md) — TypeSafe, Herdr, and Jev UltraFast documentation sources.
+- [LICENSE](LICENSE) — MIT license.
+
+## Example implementation environment
+
+The original research was developed on a Linux server with Herdr and several coding-agent CLIs installed. That environment is useful for demonstrating the workflow, but it is not a requirement: the coordinator can run anywhere that can reach the TypeSafe API and the selected agent control surface.
